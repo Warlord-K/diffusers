@@ -17,6 +17,7 @@ from typing import List, Optional, Tuple, Union
 import torch
 from transformers import T5Tokenizer, UMT5EncoderModel
 
+from ...loaders import SD3LoraLoaderMixin
 from ...image_processor import VaeImageProcessor
 from ...models import AuraFlowTransformer2DModel, AutoencoderKL
 from ...models.attention_processor import AttnProcessor2_0, FusedAttnProcessor2_0, XFormersAttnProcessor
@@ -89,7 +90,7 @@ def retrieve_timesteps(
     return timesteps, num_inference_steps
 
 
-class AuraFlowPipeline(DiffusionPipeline):
+class AuraFlowPipeline(DiffusionPipeline, SD3LoraLoaderMixin):
     _optional_components = []
     model_cpu_offload_seq = "text_encoder->transformer->vae"
 
