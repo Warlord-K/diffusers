@@ -314,7 +314,7 @@ def parse_args(input_args=None):
     parser.add_argument(
         "--max_sequence_length",
         type=int,
-        default=77,
+        default=256,
         help="Maximum sequence length to use with with the T5 text encoder",
     )
     parser.add_argument(
@@ -326,7 +326,7 @@ def parse_args(input_args=None):
     parser.add_argument(
         "--num_validation_images",
         type=int,
-        default=4,
+        default=5,
         help="Number of images that should be generated during validation with `validation_prompt`.",
     )
     parser.add_argument(
@@ -874,6 +874,7 @@ def encode_prompt(
     ):
         device=text_encoder.device
         prompt = [prompt] if isinstance(prompt, str) else prompt
+        batch_size = len(prompt)
         # See Section 3.1. of the paper.
         text_inputs = tokenizer(
                 prompt,
@@ -898,6 +899,11 @@ def encode_prompt(
         prompt_embeds = text_encoder(**text_inputs)[0]
         prompt_attention_mask = text_inputs["attention_mask"].unsqueeze(-1).expand(prompt_embeds.shape)
         prompt_embeds = prompt_embeds * prompt_attention_mask
+        _, seq_len, _ = prompt_embeds.shape
+
+        # duplicate text embeddings and attention mask for each generation per prompt, using mps friendly method
+        prompt_embeds = prompt_embeds.repeat(1, num_images_per_prompt, 1)
+        prompt_embeds = prompt_embeds.view(batch_size * num_images_per_prompt, seq_len, -1)
 
         # prompt_embeds = prompt_embeds.to(dtype=dtype, device=device)
         return prompt_embeds, prompt_attention_mask
@@ -1479,7 +1485,7 @@ def main(args):
                 # Sample noise that we'll add to the latents
                 noise = torch.randn_like(model_input)
                 bsz = model_input.shape[0]
-
+                
                 # Sample a random timestep for each image
                 # for weighting schemes where we sample timesteps non-uniformly
                 u = compute_density_for_timestep_sampling(
@@ -1490,23 +1496,30 @@ def main(args):
                     mode_scale=args.mode_scale,
                 )
                 indices = (u * noise_scheduler_copy.config.num_train_timesteps).long()
-                timesteps = noise_scheduler_copy.timesteps[indices].to(device=model_input.device)
+                timesteps = noise_scheduler_copy.timesteps[indices].to(device=model_input.device).clip(0,980)
 
                 # Add noise according to flow matching.
                 sigmas = get_sigmas(timesteps, n_dim=model_input.ndim, dtype=model_input.dtype)
                 noisy_model_input = sigmas * noise + (1.0 - sigmas) * model_input
 
+
+                # timesteps = torch.rand((bsz,)).to(model_input.device)
+                tiny_timesteps = timesteps/1000
+                texp = tiny_timesteps.view([bsz, *([1] * len(model_input.shape[1:]))])
+                noise = torch.randn_like(model_input)
+                # noisy_model_input = (1 - texp) * model_input + texp * noise
+                
                 # Predict the noise residual
                 model_pred = transformer(
                     hidden_states=noisy_model_input,
-                    timestep=timesteps,
+                    timestep=tiny_timesteps,
                     encoder_hidden_states=prompt_embeds,
                     return_dict=False,
                 )[0]
 
                 # Follow: Section 5 of https://arxiv.org/abs/2206.00364.
                 # Preconditioning of the model outputs.
-                model_pred = model_pred * (-sigmas) + noisy_model_input
+                # model_pred = model_pred * (-sigmas) + noisy_model_input
 
                 # these weighting schemes use a uniform timestep sampling
                 # and instead post-weight the loss
@@ -1530,10 +1543,13 @@ def main(args):
                     prior_loss = prior_loss.mean()
 
                 # Compute regular loss.
-                loss = torch.mean(
-                    (weighting.float() * (model_pred.float() - target.float()) ** 2).reshape(target.shape[0], -1),
-                    1,
-                )
+                # loss = torch.mean(
+                #     (weighting.float() * (model_pred.float() - target.float()) ** 2).reshape(target.shape[0], -1),
+                #     1,
+                # )
+                model_pred = noise_scheduler.step(model_pred, timesteps, noisy_model_input, return_dict=False)[0]
+                # loss = ((noisy_model_input - model_input - model_pred) ** 2).mean(dim=list(range(1, len(model_input.shape))))
+                loss = ((model_input - model_pred) ** 2).mean(dim=list(range(1, len(model_input.shape))))
                 loss = loss.mean()
 
                 if args.with_prior_preservation:
@@ -1646,7 +1662,6 @@ def main(args):
         pipeline = AuraFlowPipeline.from_pretrained(
             args.pretrained_model_name_or_path,
             vae=vae,
-            text_encoder=accelerator.unwrap_model(text_encoder),
             transformer=accelerator.unwrap_model(transformer),
             revision=args.revision,
             variant=args.variant,
