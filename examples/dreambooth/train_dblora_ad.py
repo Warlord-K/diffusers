@@ -1,17 +1,5 @@
 #!/usr/bin/env python
 # coding=utf-8
-# Copyright 2024 The HuggingFace Inc. team. All rights reserved.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
 
 import argparse
 import copy
@@ -184,7 +172,7 @@ def log_validation(
     # autocast_ctx = torch.autocast(accelerator.device.type) if not is_final_validation else nullcontext()
     autocast_ctx = nullcontext()
     with autocast_ctx:
-        images = [pipeline(prompt= validation_prompts[i], guidance_scale=3.5, height=512, width=512, generator=generator).images[0] for i in range(len(validation_prompts))]
+        images = [pipeline(prompt= validation_prompts[i], guidance_scale=3.5, height=1024, width=1024, generator=generator).images[0] for i in range(len(validation_prompts))]
 
     for tracker in accelerator.trackers:
         phase_name = "test" if is_final_validation else "validation"
@@ -370,7 +358,7 @@ def parse_args(input_args=None):
     parser.add_argument(
         "--resolution",
         type=int,
-        default=512,
+        default=1024,
         help=(
             "The resolution for input images, all the images in the train/validation dataset will be resized to this"
             " resolution"
@@ -1496,8 +1484,10 @@ def main(args):
                     mode_scale=args.mode_scale,
                 )
                 indices = (u * noise_scheduler_copy.config.num_train_timesteps).long()
-                timesteps = noise_scheduler_copy.timesteps[indices].to(device=model_input.device).clip(0,980)
-
+                timesteps = noise_scheduler_copy.timesteps[indices].to(device=model_input.device)
+                # if timesteps < 0:
+                #     timesteps += 1
+                # print(timesteps)
                 # Add noise according to flow matching.
                 sigmas = get_sigmas(timesteps, n_dim=model_input.ndim, dtype=model_input.dtype)
                 noisy_model_input = sigmas * noise + (1.0 - sigmas) * model_input
@@ -1519,7 +1509,7 @@ def main(args):
 
                 # Follow: Section 5 of https://arxiv.org/abs/2206.00364.
                 # Preconditioning of the model outputs.
-                # model_pred = model_pred * (-sigmas) + noisy_model_input
+                model_pred = model_pred * (-sigmas) + noisy_model_input
 
                 # these weighting schemes use a uniform timestep sampling
                 # and instead post-weight the loss
@@ -1547,9 +1537,9 @@ def main(args):
                 #     (weighting.float() * (model_pred.float() - target.float()) ** 2).reshape(target.shape[0], -1),
                 #     1,
                 # )
-                model_pred = noise_scheduler.step(model_pred, timesteps, noisy_model_input, return_dict=False)[0]
+                # model_pred = noise_scheduler.step(model_pred, timesteps, noisy_model_input, return_dict=False)[0]
                 # loss = ((noisy_model_input - model_input - model_pred) ** 2).mean(dim=list(range(1, len(model_input.shape))))
-                loss = ((model_input - model_pred) ** 2).mean(dim=list(range(1, len(model_input.shape))))
+                loss = ((model_input.float() - model_pred.float()) ** 2).mean(dim=list(range(1, len(model_input.shape))))
                 loss = loss.mean()
 
                 if args.with_prior_preservation:
@@ -1624,7 +1614,7 @@ def main(args):
                     variant=args.variant,
                     torch_dtype=weight_dtype,
                 )
-                pipeline_args = {"prompt": args.validation_prompt, "guidance_scale":3.5, "height":512, "width":512}
+                pipeline_args = {"prompt": args.validation_prompt, "guidance_scale":3.5, "height":1024, "width":1024}
                 images = log_validation(
                     pipeline=pipeline,
                     args=args,
@@ -1674,7 +1664,7 @@ def main(args):
         images = []
         if args.validation_prompt and args.num_validation_images > 0:
             # pipeline_args = {"prompt": args.validation_prompt}
-            pipeline_args = {"prompt": args.validation_prompt, "guidance_scale":3.5, "height":512, "width":512}
+            pipeline_args = {"prompt": args.validation_prompt, "guidance_scale":3.5, "height":1024, "width":1024}
             images = log_validation(
                 pipeline=pipeline,
                 args=args,
@@ -1699,6 +1689,7 @@ def main(args):
                 folder_path=args.output_dir,
                 commit_message="End of training",
                 ignore_patterns=["step_*", "epoch_*"],
+                private=True
             )
 
     accelerator.end_training()
