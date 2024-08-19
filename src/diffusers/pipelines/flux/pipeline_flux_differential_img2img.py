@@ -19,7 +19,7 @@ import numpy as np
 import torch
 from transformers import CLIPTextModel, CLIPTokenizer, T5EncoderModel, T5TokenizerFast
 
-from ...image_processor import VaeImageProcessor
+from ...image_processor import VaeImageProcessor, PipelineImageInput
 from ...loaders import FluxLoraLoaderMixin
 from ...models.autoencoders import AutoencoderKL
 from ...models.transformers import FluxTransformer2DModel
