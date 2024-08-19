@@ -534,8 +534,7 @@ class FluxDifferentialImg2ImgPipeline(DiffusionPipeline, FluxLoraLoaderMixin):
         noise = randn_tensor(shape, generator=generator, device=device, dtype=dtype)
         init_latents = self.scheduler.scale_noise(init_latents, timestep, noise)
         latents = init_latents.to(device=device, dtype=dtype)
-        
-        latents = self._pack_latents(latents, batch_size, num_channels_latents, height, width)
+        latents = self._pack_latents(latents, latents.shape[0], num_channels_latents, height, width)
         latent_image_ids = self._prepare_latent_image_ids(batch_size, height, width, device, dtype)
 
         return latents, latent_image_ids
@@ -704,7 +703,7 @@ class FluxDifferentialImg2ImgPipeline(DiffusionPipeline, FluxLoraLoaderMixin):
 
         init_image = self.image_processor.preprocess(image, height=height, width=width).to(dtype=torch.float32)
         map = self.mask_processor.preprocess(
-            map, height=height // self.vae_scale_factor, width=width // self.vae_scale_factor
+            map, height=2 * height // self.vae_scale_factor, width=2 * width // self.vae_scale_factor
         ).to(device)
 
         sigmas = np.linspace(1.0, 1 / num_inference_steps, num_inference_steps)
@@ -731,7 +730,6 @@ class FluxDifferentialImg2ImgPipeline(DiffusionPipeline, FluxLoraLoaderMixin):
         # end diff diff change
         timesteps, num_inference_steps = self.get_timesteps(num_inference_steps, strength, device)
         latent_timestep = timesteps[:1].repeat(batch_size * num_images_per_prompt)
-
         # 4. Prepare latent variables
         num_channels_latents = self.transformer.config.in_channels // 4
         if latents is None:
@@ -746,12 +744,10 @@ class FluxDifferentialImg2ImgPipeline(DiffusionPipeline, FluxLoraLoaderMixin):
                 device,
                 generator,
             )
-
         num_warmup_steps = max(len(timesteps) - num_inference_steps * self.scheduler.order, 0)
         self._num_timesteps = len(timesteps)
 
         # preparations for diff diff
-
         original_with_noise, original_with_noise_img_id = self.prepare_latents(
             batch_size * num_images_per_prompt,
             num_channels_latents,
@@ -788,8 +784,11 @@ class FluxDifferentialImg2ImgPipeline(DiffusionPipeline, FluxLoraLoaderMixin):
                 else:
                     mask = masks[i].unsqueeze(0).to(latents.dtype)
                     mask = mask.unsqueeze(1)  # fit shape
-                    latents = original_with_noise[i] * mask + latents * (1 - mask)
-                    latent_image_ids = original_with_noise_img_id[i] * mask + latent_image_ids * (1 - mask)
+                    latents = self._unpack_latents(latents, height, width, self.vae_scale_factor)
+                    original = self._unpack_latents(original_with_noise[i].unsqueeze(0), height, width, self.vae_scale_factor)
+                    latents = original * mask + latents * (1 - mask)
+                    latents = self._pack_latents(latents, latents.shape[0], num_channels_latents, latents.shape[2], latents.shape[3])
+                    # latent_image_ids = original_with_noise_img_id * mask + latent_image_ids * (1 - mask)
                 # end diff diff
 
                 # broadcast to batch dimension in a way that's compatible with ONNX/Core ML
