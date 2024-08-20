@@ -543,8 +543,8 @@ class VaeImageProcessor(ConfigMixin):
             if crops_coords is not None:
                 image = [i.crop(crops_coords) for i in image]
             if self.config.do_resize:
-                height, width = self.get_default_height_width(image[0], height, width)
-                image = [self.resize(i, height, width, resize_mode=resize_mode) for i in image]
+                # height, width = self.get_default_height_width(image[0], height, width)
+                image = [i.resize((width, height)) for i in image]
             if self.config.do_convert_rgb:
                 image = [self.convert_to_rgb(i) for i in image]
             elif self.config.do_convert_grayscale:
