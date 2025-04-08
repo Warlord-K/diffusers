@@ -284,39 +284,43 @@ class MOEFeedForwardSwiGLU(nn.Module):
         y = y + self.shared_experts(identity)
         return y
 
-    @torch.no_grad()
-    def moe_infer(self, x, flat_expert_indices, flat_expert_weights):
-        expert_cache = torch.zeros_like(x)
-        idxs = flat_expert_indices.argsort()
-        tokens_per_expert_counts = torch.bincount(flat_expert_indices, minlength=self.num_experts)
-        tokens_per_expert = torch.cumsum(tokens_per_expert_counts, dim=0)
-    
-        token_idxs = idxs // self.num_activated_experts
-    
-        for i in range(self.num_experts):
-            start_idx = tokens_per_expert[i-1] if i > 0 else 0
-            end_idx = tokens_per_expert[i]
-    
-            if start_idx == end_idx:
-                continue
-    
-            expert = self.experts[i]
-    
-            exp_token_idx = token_idxs[start_idx:end_idx]
-    
-            expert_tokens = x[exp_token_idx]
-            expert_out = expert(expert_tokens)
-            
-            weights_slice = flat_expert_weights[idxs[start_idx:end_idx]].unsqueeze(-1)
-            expert_out = expert_out * weights_slice
-    
-            expert_cache = expert_cache.to(expert_out.dtype)
-            expert_cache.scatter_reduce_(0,
-                                         exp_token_idx.view(-1, 1).repeat(1, x.shape[-1]),
-                                         expert_out,
-                                         reduce="sum",
-                                         include_self=False)
-        return expert_cache
+@torch.no_grad()
+def moe_infer(self, x, flat_expert_indices, flat_expert_weights):
+    expert_cache = torch.zeros_like(x)
+    idxs = flat_expert_indices.argsort()
+
+    tokens_per_expert_counts = torch.bincount(flat_expert_indices, minlength=self.num_experts)
+    tokens_per_expert = torch.cumsum(tokens_per_expert_counts, dim=0)
+
+    token_idxs = idxs // self.num_activated_experts
+
+    for i in range(self.num_experts):
+        start_idx = tokens_per_expert[i-1] if i > 0 else 0
+        end_idx = tokens_per_expert[i]
+
+        if start_idx == end_idx:
+            continue
+
+        expert = self.experts[i]
+
+        exp_token_idx = token_idxs[start_idx:end_idx]
+
+        expert_tokens = x[exp_token_idx]
+
+        expert_out = expert(expert_tokens)
+
+        expert_out = expert_out.contiguous()
+        weights_slice = flat_expert_weights[idxs[start_idx:end_idx]]
+
+        expert_out.mul_(weights_slice)
+        
+        expert_cache = expert_cache.to(expert_out.dtype)
+        expert_cache.scatter_reduce_(0,
+                                     exp_token_idx.view(-1, 1).repeat(1, x.shape[-1]),
+                                     expert_out,
+                                     reduce="sum",
+                                     include_self=False) 
+    return expert_cache
 
 
 class TextProjection(nn.Module):
