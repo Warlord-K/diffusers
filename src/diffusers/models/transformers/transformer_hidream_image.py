@@ -289,7 +289,7 @@ class MOEFeedForwardSwiGLU(nn.Module):
         expert_cache = torch.zeros_like(x)
         idxs = flat_expert_indices.argsort()
     
-        tokens_per_expert_counts = torch.bincount(flat_expert_indices, minlength=self.num_experts)
+        tokens_per_expert_counts = torch.bincount(flat_expert_indices, minlength=self.num_experts)[:self.num_experts]
         tokens_per_expert = torch.cumsum(tokens_per_expert_counts, dim=0)
     
         token_idxs = idxs // self.num_activated_experts
