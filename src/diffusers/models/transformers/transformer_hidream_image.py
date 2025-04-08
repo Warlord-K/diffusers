@@ -306,8 +306,9 @@ class MOEFeedForwardSwiGLU(nn.Module):
     
             expert_tokens = x[exp_token_idx]
             expert_out = expert(expert_tokens)
-    
-            expert_out.mul_(flat_expert_weights[idxs[start_idx:end_idx]].unsqueeze(-1))
+            
+            weights_slice = flat_expert_weights[idxs[start_idx:end_idx]].unsqueeze(-1)
+            expert_out = expert_out * weights_slice
     
             expert_cache = expert_cache.to(expert_out.dtype)
             expert_cache.scatter_reduce_(0,
