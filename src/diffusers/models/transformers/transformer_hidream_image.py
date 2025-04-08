@@ -287,21 +287,34 @@ class MOEFeedForwardSwiGLU(nn.Module):
     def moe_infer(self, x, flat_expert_indices, flat_expert_weights):
         expert_cache = torch.zeros_like(x)
         idxs = flat_expert_indices.argsort()
-        tokens_per_expert = flat_expert_indices.bincount().cpu().numpy().cumsum(0)
+    
+        tokens_per_expert_counts = torch.bincount(flat_expert_indices, minlength=self.num_experts)
+        tokens_per_expert = torch.cumsum(tokens_per_expert_counts, dim=0)
+    
         token_idxs = idxs // self.num_activated_experts
-        for i, end_idx in enumerate(tokens_per_expert):
-            start_idx = 0 if i == 0 else tokens_per_expert[i - 1]
+    
+        for i in range(self.num_experts):
+            start_idx = tokens_per_expert[i-1] if i > 0 else 0
+            end_idx = tokens_per_expert[i]
+    
             if start_idx == end_idx:
                 continue
+    
             expert = self.experts[i]
+    
             exp_token_idx = token_idxs[start_idx:end_idx]
+    
             expert_tokens = x[exp_token_idx]
             expert_out = expert(expert_tokens)
-            expert_out.mul_(flat_expert_weights[idxs[start_idx:end_idx]])
-
-            # for fp16 and other dtype
+    
+            expert_out.mul_(flat_expert_weights[idxs[start_idx:end_idx]].unsqueeze(-1))
+    
             expert_cache = expert_cache.to(expert_out.dtype)
-            expert_cache.scatter_reduce_(0, exp_token_idx.view(-1, 1).repeat(1, x.shape[-1]), expert_out, reduce="sum")
+            expert_cache.scatter_reduce_(0,
+                                         exp_token_idx.view(-1, 1).repeat(1, x.shape[-1]),
+                                         expert_out,
+                                         reduce="sum",
+                                         include_self=False)
         return expert_cache
 
 
