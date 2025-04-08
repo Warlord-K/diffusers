@@ -258,6 +258,7 @@ class MOEFeedForwardSwiGLU(nn.Module):
         self.experts = nn.ModuleList(
             [HiDreamImageFeedForwardSwiGLU(dim, hidden_dim) for i in range(num_routed_experts)]
         )
+        self.num_experts = len(self.experts)
         self.gate = MoEGate(
             embed_dim=dim, num_routed_experts=num_routed_experts, num_activated_experts=num_activated_experts
         )
@@ -287,7 +288,6 @@ class MOEFeedForwardSwiGLU(nn.Module):
     def moe_infer(self, x, flat_expert_indices, flat_expert_weights):
         expert_cache = torch.zeros_like(x)
         idxs = flat_expert_indices.argsort()
-    
         tokens_per_expert_counts = torch.bincount(flat_expert_indices, minlength=self.num_experts)
         tokens_per_expert = torch.cumsum(tokens_per_expert_counts, dim=0)
     
