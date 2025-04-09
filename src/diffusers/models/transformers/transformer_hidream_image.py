@@ -318,8 +318,7 @@ class MOEFeedForwardSwiGLU(nn.Module):
             expert_cache.scatter_reduce_(0,
                                          exp_token_idx.view(-1, 1).repeat(1, x.shape[-1]),
                                          expert_out,
-                                         reduce="sum",
-                                         include_self=False) 
+                                         reduce="sum") 
         return expert_cache
 
 
