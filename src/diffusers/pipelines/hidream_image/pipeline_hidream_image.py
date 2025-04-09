@@ -703,6 +703,7 @@ class HiDreamImagePipeline(DiffusionPipeline, FromSingleFileMixin):
 
                 # compute the previous noisy sample x_t -> x_t-1
                 latents_dtype = latents.dtype
+                noisy_latents = latents.detach().clone()
                 latents = self.scheduler.step(noise_pred, t, latents, return_dict=False)[0]
 
                 if latents.dtype != latents_dtype:
